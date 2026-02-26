@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-chi/chi/v5"
 	"github.com/labstack/echo/v4"
-	lctx "github.com/vietpham102301/hermes/pkg/context"
+	lctx "github.com/vietpham102301/lightway/pkg/context"
 	"github.com/vietpham102301/lightway/pkg/router"
 )
 

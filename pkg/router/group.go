@@ -4,19 +4,29 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
-	"github.com/vietpham102301/hermes/pkg/context"
-	aerror "github.com/vietpham102301/hermes/pkg/errors"
+	"github.com/vietpham102301/lightway/pkg/context"
+	aerror "github.com/vietpham102301/lightway/pkg/errors"
 )
 
+// color returns the ANSI escape code if colors are enabled, or empty string otherwise.
+// Respects the NO_COLOR (https://no-color.org/) convention and TERM=dumb.
+func color(code string) string {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+		return ""
+	}
+	return code
+}
+
 const (
-	ColorGreen  = "\033[32m"
-	ColorWhite  = "\033[37m"
-	ColorBlue   = "\033[34m"
-	ColorYellow = "\033[33m"
-	ColorReset  = "\033[0m"
-	ColorRed    = "\033[31m"
-	ColorPurple = "\033[35m"
+	ansiGreen  = "\033[32m"
+	ansiWhite  = "\033[37m"
+	ansiBlue   = "\033[34m"
+	ansiYellow = "\033[33m"
+	ansiReset  = "\033[0m"
+	ansiRed    = "\033[31m"
+	ansiPurple = "\033[35m"
 )
 
 type HandlerFunc func(c *context.Context) error
@@ -121,21 +131,21 @@ func (r *Router) Handle(method, path string, handler HandlerFunc) {
 
 func (r *Router) PrintRoutes() {
 	for _, route := range *r.routes {
-		methodColor := ColorGreen
+		methodColor := ansiGreen
 		if route.Method == "POST" || route.Method == "PUT" {
-			methodColor = ColorYellow
+			methodColor = ansiYellow
 		} else if route.Method == "DELETE" {
-			methodColor = ColorRed
+			methodColor = ansiRed
 		} else if route.Method == "OPTIONS" {
-			methodColor = ColorPurple
+			methodColor = ansiPurple
 		}
 
 		fmt.Printf("%s[Router] %s%-7s%s %s%s%s\n",
-			ColorWhite,
-			methodColor, route.Method,
-			ColorReset,
-			ColorBlue, route.Path,
-			ColorReset,
+			color(ansiWhite),
+			color(methodColor), route.Method,
+			color(ansiReset),
+			color(ansiBlue), route.Path,
+			color(ansiReset),
 		)
 	}
 }

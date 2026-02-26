@@ -5,14 +5,18 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/vietpham102301/hermes/pkg/httpclient"
+	"github.com/vietpham102301/lightway/pkg/httpclient"
 )
 
+// TelegramNotifier sends notifications via the Telegram Bot API.
+// It implements the Notifier interface.
 type TelegramNotifier struct {
 	Token  string
 	ChatID string
 	Client *httpclient.Client
 }
+
+var _ Notifier = (*TelegramNotifier)(nil)
 
 func NewTelegramNotifier(client *httpclient.Client, token, chatID string) *TelegramNotifier {
 	return &TelegramNotifier{
@@ -22,7 +26,8 @@ func NewTelegramNotifier(client *httpclient.Client, token, chatID string) *Teleg
 	}
 }
 
-func (t *TelegramNotifier) SendNotifyTelegram(message string) error {
+// Send implements the Notifier interface.
+func (t *TelegramNotifier) Send(message string) error {
 	if t.Token == "" || t.ChatID == "" {
 		return fmt.Errorf("telegram token or chat id is empty")
 	}

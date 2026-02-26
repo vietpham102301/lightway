@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vietpham102301/hermes/pkg/logger"
+	"github.com/vietpham102301/lightway/pkg/logger"
 )
 
 const (

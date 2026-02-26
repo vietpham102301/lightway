@@ -6,17 +6,42 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/vietpham102301/hermes/config"
 )
 
-func NewRedisClient(cfg *config.Config) (*redis.Client, error) {
+// RedisConfig holds the configuration for connecting to a Redis instance.
+// Zero values for pool fields will use sensible defaults.
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+
+	PoolSize     int // default: 10
+	MinIdleConns int // default: 5
+	MaxRetries   int // default: 3
+}
+
+func (c *RedisConfig) applyDefaults() {
+	if c.PoolSize <= 0 {
+		c.PoolSize = 10
+	}
+	if c.MinIdleConns <= 0 {
+		c.MinIdleConns = 5
+	}
+	if c.MaxRetries <= 0 {
+		c.MaxRetries = 3
+	}
+}
+
+func NewRedisClient(cfg RedisConfig) (*redis.Client, error) {
+	cfg.applyDefaults()
+
 	client := redis.NewClient(&redis.Options{
-		Addr:         cfg.RedisConfig.Addr,
-		Password:     cfg.RedisConfig.Password,
-		DB:           cfg.RedisConfig.DB,
-		PoolSize:     10,
-		MinIdleConns: 5,
-		MaxRetries:   3,
+		Addr:         cfg.Addr,
+		Password:     cfg.Password,
+		DB:           cfg.DB,
+		PoolSize:     cfg.PoolSize,
+		MinIdleConns: cfg.MinIdleConns,
+		MaxRetries:   cfg.MaxRetries,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

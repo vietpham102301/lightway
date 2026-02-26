@@ -249,48 +249,59 @@ token, err := jwt.GenerateToken(
 
 ### HTTP Client
 
-HTTP client wrapper with connection pooling and automatic error handling.
+HTTP client wrapper with connection pooling, automatic error handling, and **retry with exponential backoff**.
 
 ```go
 import "github.com/vietpham102301/lightway/pkg/httpclient"
 
+// Basic client (no retry)
 client := httpclient.NewClient()
 
-// Send request and receive response bytes
-body, err := client.RequestBytes(
-    ctx,
-    http.MethodPost,
-    "https://api.example.com/data",
-    payload,                            // body (auto-marshaled to JSON)
-    map[string]string{                  // headers
-        "Authorization": "Bearer token",
-    },
-)
+// Client with custom config
+client := httpclient.NewClientWithConfig(httpclient.Config{
+    MaxIdleConns:        200,
+    MaxIdleConnsPerHost: 20,
+    Timeout:             30 * time.Second,
+})
 
-// Or use Do() for full control
-req, _ := http.NewRequest("GET", url, nil)
-resp, err := client.Do(req)
-defer resp.Body.Close()
+// Enable retry with exponential backoff
+client := httpclient.NewClient().WithRetry(httpclient.RetryConfig{
+    MaxRetries: 3,                    // up to 3 retries (4 total attempts)
+    BaseDelay:  500 * time.Millisecond, // 500ms → 1s → 2s → ...
+    MaxDelay:   10 * time.Second,     // cap at 10s
+    RetryOn:    []int{429, 502, 503, 504}, // default retryable status codes
+})
+
+// Send request
+body, err := client.RequestBytes(ctx, http.MethodPost, url, payload, headers)
+
+// Custom retry decision
+client := httpclient.NewClient().WithRetry(httpclient.RetryConfig{
+    MaxRetries: 5,
+    BaseDelay:  100 * time.Millisecond,
+    ShouldRetry: func(resp *http.Response, err error) bool {
+        return err != nil || resp.StatusCode == http.StatusConflict
+    },
+})
 ```
 
-**Default settings:** Max Idle Conns: 100 · Per Host: 10 · Idle Timeout: 90s · Request Timeout: 60s
+**Default retry behavior:** retries on 429 (Rate Limit), 502, 503, 504 with exponential backoff. Context cancellation is respected between retries.
 
 ---
 
-### Notifier (Telegram)
+### Notifier
 
-Send notifications via the Telegram Bot API.
+Send notifications via pluggable notifier implementations.
 
 ```go
 import "github.com/vietpham102301/lightway/pkg/notifier"
 
-telegramNotifier := notifier.NewTelegramNotifier(
-    httpClient,   // *httpclient.Client
-    botToken,     // Telegram Bot token
-    chatID,       // Target chat ID
-)
+// Notifier interface — implement for any channel
+var n notifier.Notifier
 
-err := telegramNotifier.SendNotifyTelegram("✅ Deployment completed!")
+// Telegram implementation
+n = notifier.NewTelegramNotifier(httpClient, botToken, chatID)
+err := n.Send("✅ Deployment completed!")
 ```
 
 ---
@@ -306,30 +317,30 @@ Router performance compared against popular Go frameworks.
 | Framework | ns/op | B/op | allocs/op |
 |-----------|------:|-----:|----------:|
 | **net/http (stdlib)** | 159 | 274 | 6 |
-| **Lightway** | 189 | 322 | 8 |
-| Chi | 265 | 642 | 8 |
-| Gin | 410 | 1040 | 9 |
-| Echo | 483 | 1016 | 10 |
+| **Lightway** | 191 | 322 | 8 |
+| Chi | 240 | 642 | 8 |
+| Gin | 389 | 1040 | 9 |
+| Echo | 412 | 1016 | 10 |
 
 ### Parameterized Route — `GET /users/{id}`
 
 | Framework | ns/op | B/op | allocs/op |
 |-----------|------:|-----:|----------:|
-| **net/http (stdlib)** | 233 | 290 | 7 |
-| **Lightway** | 283 | 338 | 9 |
-| Chi | 403 | 978 | 10 |
-| Gin | 420 | 1040 | 9 |
-| Echo | 495 | 1016 | 10 |
+| **net/http (stdlib)** | 226 | 290 | 7 |
+| **Lightway** | 260 | 338 | 9 |
+| Chi | 362 | 978 | 10 |
+| Gin | 397 | 1040 | 9 |
+| Echo | 432 | 1016 | 10 |
 
 ### Multi-Param Route — `GET /users/{id}/posts/{postId}`
 
 | Framework | ns/op | B/op | allocs/op |
 |-----------|------:|-----:|----------:|
-| **net/http (stdlib)** | 351 | 322 | 8 |
-| **Lightway** | 388 | 370 | 10 |
-| Chi | 443 | 978 | 10 |
-| Gin | 462 | 1040 | 9 |
-| Echo | 512 | 1016 | 10 |
+| **net/http (stdlib)** | 314 | 322 | 8 |
+| **Lightway** | 352 | 370 | 10 |
+| Chi | 398 | 978 | 10 |
+| Gin | 407 | 1040 | 9 |
+| Echo | 446 | 1016 | 10 |
 
 > **Key takeaways:**
 > - Lightway performs within **~15-20%** of Go's standard library — the thinnest wrapper overhead among all tested frameworks.
