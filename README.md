@@ -295,6 +295,55 @@ err := telegramNotifier.SendNotifyTelegram("✅ Deployment completed!")
 
 ---
 
+## 📊 Benchmarks
+
+Router performance compared against popular Go frameworks.
+
+**Environment:** Apple M2 Pro · Go 1.25.6 · macOS · `go test -bench=. -benchmem -count=3`
+
+### Static Route — `GET /`
+
+| Framework | ns/op | B/op | allocs/op |
+|-----------|------:|-----:|----------:|
+| **net/http (stdlib)** | 159 | 274 | 6 |
+| **Lightway** | 189 | 322 | 8 |
+| Chi | 265 | 642 | 8 |
+| Gin | 410 | 1040 | 9 |
+| Echo | 483 | 1016 | 10 |
+
+### Parameterized Route — `GET /users/{id}`
+
+| Framework | ns/op | B/op | allocs/op |
+|-----------|------:|-----:|----------:|
+| **net/http (stdlib)** | 233 | 290 | 7 |
+| **Lightway** | 283 | 338 | 9 |
+| Chi | 403 | 978 | 10 |
+| Gin | 420 | 1040 | 9 |
+| Echo | 495 | 1016 | 10 |
+
+### Multi-Param Route — `GET /users/{id}/posts/{postId}`
+
+| Framework | ns/op | B/op | allocs/op |
+|-----------|------:|-----:|----------:|
+| **net/http (stdlib)** | 351 | 322 | 8 |
+| **Lightway** | 388 | 370 | 10 |
+| Chi | 443 | 978 | 10 |
+| Gin | 462 | 1040 | 9 |
+| Echo | 512 | 1016 | 10 |
+
+> **Key takeaways:**
+> - Lightway performs within **~15-20%** of Go's standard library — the thinnest wrapper overhead among all tested frameworks.
+> - **~2x faster** than Gin and Echo on static routes with **3x less memory** allocation.
+> - Consistently uses the **fewest bytes per operation** among third-party routers.
+
+Run the benchmarks yourself:
+
+```bash
+go test -bench=. -benchmem -count=3 ./benchmarks/
+```
+
+---
+
 ## 🏗️ Full Example
 
 A minimal web application using multiple Lightway packages together:
