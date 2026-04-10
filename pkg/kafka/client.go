@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"time"
@@ -82,7 +83,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 
 	// Ping broker to validate connectivity.
-	if err := kClient.Ping(nil); err != nil {
+	if err := kClient.Ping(context.TODO()); err != nil {
 		kClient.Close()
 		return nil, fmt.Errorf("%w: %w", ErrBrokerUnavailable, err)
 	}
