@@ -22,6 +22,7 @@ go get github.com/vietpham102301/lightway
 | `errors` | Structured application errors with HTTP status codes |
 | `httpclient` | HTTP client wrapper with connection pooling |
 | `jwt` | JWT token generation using RS256 algorithm |
+| `kafka` | Generic Kafka producer & consumer with retry, DLQ, and graceful shutdown |
 | `logger` | Structured logging based on `log/slog` |
 | `notifier` | Send notifications via Telegram Bot API |
 | `pool` | Generic, dynamically-scaling worker pool |
@@ -372,6 +373,215 @@ snap := p.Stats()
 | `QueueSize` | `MaxWorkers × 10` |
 | `IdleTimeout` | `30s` |
 | `ScaleInterval` | `100ms` |
+
+---
+
+### Kafka
+
+Generic Kafka producer and consumer backed by [franz-go](https://github.com/twmb/franz-go). Supports both sync and async producing, consumer groups with automatic retry and exponential backoff, dead letter queue (DLQ), panic recovery, graceful shutdown, and per-instance metrics.
+
+```go
+import "github.com/vietpham102301/lightway/pkg/kafka"
+```
+
+**Step 1 — connect to the broker:**
+
+```go
+client, err := kafka.NewClient(kafka.ClientConfig{
+    Brokers: []string{"localhost:9092"},
+})
+if err != nil {
+    log.Fatal(err) // returns ErrBrokerUnavailable if no broker reachable
+}
+defer client.Close()
+```
+
+With TLS + SASL authentication:
+
+```go
+client, err := kafka.NewClient(kafka.ClientConfig{
+    Brokers: []string{"broker:9093"},
+    TLS:     tlsConfig, // *tls.Config
+    SASL: &kafka.SASLConfig{
+        Mechanism: "SCRAM-SHA-512", // PLAIN | SCRAM-SHA-256 | SCRAM-SHA-512
+        Username:  "user",
+        Password:  "password",
+    },
+})
+```
+
+---
+
+**Step 2 — produce messages:**
+
+```go
+type OrderEvent struct {
+    OrderID string `json:"order_id"`
+    Total   int    `json:"total"`
+}
+
+producer := kafka.NewProducer[OrderEvent](client, kafka.ProducerConfig[OrderEvent]{
+    Topic: "orders",
+})
+defer producer.Close()
+
+// Sync (default) — blocks until broker acknowledges
+err := producer.Send(ctx, OrderEvent{OrderID: "abc-123", Total: 9900})
+
+// Send a batch in one call
+err = producer.SendBatch(ctx, []OrderEvent{
+    {OrderID: "abc-124", Total: 1500},
+    {OrderID: "abc-125", Total: 3200},
+})
+```
+
+Async mode for higher throughput (errors surface through `Stats()`):
+
+```go
+producer := kafka.NewProducer[OrderEvent](client, kafka.ProducerConfig[OrderEvent]{
+    Topic:              "orders",
+    Async:              true,
+    Linger:             50 * time.Millisecond, // batch window
+    MaxBufferedRecords: 2000,
+})
+
+producer.Send(ctx, OrderEvent{OrderID: "abc-126", Total: 500}) // non-blocking
+producer.Flush(ctx) // wait until all buffered records are delivered
+```
+
+Custom partition key and serializer:
+
+```go
+producer := kafka.NewProducer[OrderEvent](client, kafka.ProducerConfig[OrderEvent]{
+    Topic:        "orders",
+    PartitionKey: func(e OrderEvent) string { return e.OrderID },
+    Serializer: func(e OrderEvent) ([]byte, error) {
+        return proto.Marshal(&pb.OrderEvent{OrderId: e.OrderID})
+    },
+})
+```
+
+---
+
+**Step 3 — consume messages:**
+
+Implement `Handler[T]` or use the `HandlerFunc[T]` adapter:
+
+```go
+type OrderHandler struct{}
+
+func (h *OrderHandler) Handle(ctx context.Context, msg kafka.Message[OrderEvent]) error {
+    fmt.Printf("received order %s on partition %d offset %d\n",
+        msg.Payload.OrderID, msg.Partition, msg.Offset)
+    return nil
+}
+```
+
+Create the consumer and start it:
+
+```go
+consumer, err := kafka.NewConsumer[OrderEvent](client,
+    kafka.ConsumerConfig[OrderEvent]{
+        GroupID: "order-service",
+        Topics:  []string{"orders"},
+    },
+    &OrderHandler{},
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Blocks until ctx is cancelled, then drains and returns.
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+if err := consumer.Start(ctx); err != nil {
+    log.Fatal(err)
+}
+```
+
+Using `HandlerFunc[T]` for simple inline handlers:
+
+```go
+consumer, _ := kafka.NewConsumer[OrderEvent](client,
+    kafka.ConsumerConfig[OrderEvent]{
+        GroupID: "order-service",
+        Topics:  []string{"orders"},
+    },
+    kafka.HandlerFunc[OrderEvent](func(ctx context.Context, msg kafka.Message[OrderEvent]) error {
+        return processOrder(ctx, msg.Payload)
+    }),
+)
+```
+
+---
+
+**Retry & Dead Letter Queue:**
+
+Failed messages are retried with exponential backoff before being sent to a DLQ topic. The offset is committed regardless to prevent infinite reprocessing.
+
+```go
+consumer, _ := kafka.NewConsumer[OrderEvent](client,
+    kafka.ConsumerConfig[OrderEvent]{
+        GroupID:        "order-service",
+        Topics:         []string{"orders"},
+        MaxRetries:     5,
+        RetryBaseDelay: 500 * time.Millisecond, // 500ms → 1s → 2s → 4s → 8s
+        RetryMaxDelay:  10 * time.Second,
+        DLQ: &kafka.DLQConfig{
+            Topic: "orders.dlq",
+        },
+    },
+    handler,
+)
+```
+
+DLQ records carry these headers automatically:
+
+| Header | Value |
+|--------|-------|
+| `x-original-topic` | Source topic |
+| `x-original-partition` | Source partition |
+| `x-original-offset` | Source offset |
+| `x-error` | Error message from last attempt |
+
+---
+
+**Observability:**
+
+```go
+// Producer
+snap := producer.Stats()
+// snap.MessagesSent — total records successfully delivered
+// snap.Errors       — total delivery failures
+
+// Consumer
+snap := consumer.Stats()
+// snap.MessagesReceived      — total records polled from Kafka
+// snap.MessagesProcessed     — records handled without error
+// snap.HandlerErrors         — handler invocations that returned error
+// snap.DeserializationErrors — records that failed to deserialize
+// snap.DLQErrors             — records that failed to publish to DLQ
+// snap.Panics                — handler panics recovered
+```
+
+---
+
+**Config defaults:**
+
+| Field | Default |
+|-------|---------|
+| `ClientConfig.DialTimeout` | `10s` |
+| `ClientConfig.RequestTimeout` | `30s` |
+| `ProducerConfig.RecordRetries` | `3` |
+| `ProducerConfig.DeliveryTimeout` | `30s` |
+| `ProducerConfig.Linger` | `100ms` |
+| `ProducerConfig.MaxBufferedRecords` | `1000` |
+| `ConsumerConfig.MaxRetries` | `3` |
+| `ConsumerConfig.RetryBaseDelay` | `500ms` |
+| `ConsumerConfig.RetryMaxDelay` | `10s` |
+| `ConsumerConfig.SessionTimeout` | `10s` |
+| `ConsumerConfig.RebalanceTimeout` | `30s` |
 
 ---
 
