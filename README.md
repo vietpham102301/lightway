@@ -24,6 +24,7 @@ go get github.com/vietpham102301/lightway
 | `jwt` | JWT token generation using RS256 algorithm |
 | `logger` | Structured logging based on `log/slog` |
 | `notifier` | Send notifications via Telegram Bot API |
+| `pool` | Generic, dynamically-scaling worker pool |
 | `router` | HTTP router with route groups & middleware chain |
 | `sql` | PostgreSQL connection pool initialization (pgxpool) |
 
@@ -286,6 +287,91 @@ client := httpclient.NewClient().WithRetry(httpclient.RetryConfig{
 ```
 
 **Default retry behavior:** retries on 429 (Rate Limit), 502, 503, 504 with exponential backoff. Context cancellation is respected between retries.
+
+---
+
+### Worker Pool
+
+A generic, dynamically-scaling worker pool. Add a new job type by implementing a single `Job[T]` interface — the pool handles worker lifecycle, panic recovery, graceful shutdown, and auto-scaling.
+
+```go
+import "github.com/vietpham102301/lightway/pkg/pool"
+```
+
+**Step 1 — implement `Job[T]`:**
+
+```go
+type SendEmailJob struct {
+    To      string
+    Subject string
+    Body    string
+}
+
+func (j SendEmailJob) Execute(ctx context.Context) (string, error) {
+    if ctx.Err() != nil {
+        return "", ctx.Err()
+    }
+    emailID, err := emailService.Send(j.To, j.Subject, j.Body)
+    return emailID, err
+}
+```
+
+**Step 2 — create and start the pool:**
+
+```go
+p := pool.New[string](pool.Config{
+    MinWorkers:  2,   // always-on goroutines
+    MaxWorkers:  20,  // scale up to 20 under load
+    QueueSize:   500, // buffered job queue
+})
+p.Start()
+defer p.Stop() // graceful shutdown — waits for running jobs to finish
+```
+
+**Step 3 — submit jobs and receive results:**
+
+```go
+resultCh, err := p.Submit(SendEmailJob{To: "user@example.com", Subject: "Hi", Body: "..."})
+switch {
+case errors.Is(err, pool.ErrQueueFull):
+    // queue at capacity — retry, drop, or log
+case err != nil:
+    // pool is stopped
+default:
+    res := <-resultCh
+    if res.Err != nil {
+        log.Printf("failed: %v", res.Err)
+    } else {
+        log.Printf("email sent, ID: %s", res.Value)
+    }
+}
+```
+
+**Auto-scaling behavior:**
+- Scales **up** when queue depth grows — spawns up to `MaxWorkers` goroutines
+- Scales **down** automatically — workers above `MinWorkers` exit after `IdleTimeout` of inactivity
+- Panicking jobs are **recovered** without killing the worker; the pool keeps running
+
+**Observability:**
+
+```go
+snap := p.Stats()
+// snap.ActiveWorkers — live goroutines
+// snap.QueueDepth    — pending jobs
+// snap.Processed     — total completed (success + error)
+// snap.Failed        — jobs that returned non-nil error
+// snap.Panics        — jobs recovered from panic
+```
+
+**Config defaults** (all zero values are safe):
+
+| Field | Default |
+|-------|---------|
+| `MinWorkers` | `2` |
+| `MaxWorkers` | `runtime.NumCPU() × 2` |
+| `QueueSize` | `MaxWorkers × 10` |
+| `IdleTimeout` | `30s` |
+| `ScaleInterval` | `100ms` |
 
 ---
 
