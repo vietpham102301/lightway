@@ -87,14 +87,14 @@ type Consumer[T any] struct {
 func NewConsumer[T any](client *Client, cfg ConsumerConfig[T], handler Handler[T]) (*Consumer[T], error) {
 	cfg.applyDefaults()
 
-	opts := []kgo.Opt{
+	opts := append([]kgo.Opt{
 		kgo.SeedBrokers(client.brokers...),
 		kgo.ConsumerGroup(cfg.GroupID),
 		kgo.ConsumeTopics(cfg.Topics...),
 		kgo.SessionTimeout(cfg.SessionTimeout),
 		kgo.RebalanceTimeout(cfg.RebalanceTimeout),
 		kgo.Balancers(kgo.CooperativeStickyBalancer()),
-	}
+	}, client.authOpts...)
 
 	if !cfg.DisableAutoCommit {
 		opts = append(opts, kgo.AutoCommitMarks())

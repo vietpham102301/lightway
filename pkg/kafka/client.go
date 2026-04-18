@@ -50,8 +50,9 @@ func (c *ClientConfig) applyDefaults() {
 
 // Client wraps a franz-go kgo.Client and is shared between Producer and Consumer instances.
 type Client struct {
-	kgo     *kgo.Client
-	brokers []string
+	kgo      *kgo.Client
+	brokers  []string
+	authOpts []kgo.Opt // SASL + TLS options, reused when creating per-consumer clients
 }
 
 // NewClient creates and validates a Kafka broker connection.
@@ -59,14 +60,10 @@ type Client struct {
 func NewClient(cfg ClientConfig) (*Client, error) {
 	cfg.applyDefaults()
 
-	opts := []kgo.Opt{
-		kgo.SeedBrokers(cfg.Brokers...),
-		kgo.DialTimeout(cfg.DialTimeout),
-		kgo.RequestTimeoutOverhead(cfg.RequestTimeout),
-	}
+	var authOpts []kgo.Opt
 
 	if cfg.TLS != nil {
-		opts = append(opts, kgo.DialTLSConfig(cfg.TLS))
+		authOpts = append(authOpts, kgo.DialTLSConfig(cfg.TLS))
 	}
 
 	if cfg.SASL != nil {
@@ -74,8 +71,14 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		opts = append(opts, saslOpt)
+		authOpts = append(authOpts, saslOpt)
 	}
+
+	opts := append([]kgo.Opt{
+		kgo.SeedBrokers(cfg.Brokers...),
+		kgo.DialTimeout(cfg.DialTimeout),
+		kgo.RequestTimeoutOverhead(cfg.RequestTimeout),
+	}, authOpts...)
 
 	kClient, err := kgo.NewClient(opts...)
 	if err != nil {
@@ -90,7 +93,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 
 	logger.Info("kafka: broker connection established", "brokers", cfg.Brokers)
 
-	return &Client{kgo: kClient, brokers: cfg.Brokers}, nil
+	return &Client{kgo: kClient, brokers: cfg.Brokers, authOpts: authOpts}, nil
 }
 
 // Close releases the underlying connection.
