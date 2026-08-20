@@ -133,9 +133,16 @@ func (c *Client) WithRetry(cfg RetryConfig) *Client {
 }
 
 func (c *Client) RequestBytes(ctx context.Context, method, url string, body any, headers map[string]string) ([]byte, error) {
-	jsonBytes, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
+	// A nil body means "no request body" — not the JSON value `null`.
+	// Sending a body (with Content-Type) on GET requests makes some
+	// upstreams (e.g. GCP front ends) reject the request as malformed.
+	var jsonBytes []byte
+	if body != nil {
+		var err error
+		jsonBytes, err = json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	maxAttempts := 1
@@ -164,13 +171,18 @@ func (c *Client) RequestBytes(ctx context.Context, method, url string, body any,
 			}
 		}
 
-		reqBody := bytes.NewBuffer(jsonBytes)
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(jsonBytes)
+		}
 		req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
 
-		req.Header.Set("Content-Type", "application/json")
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		for k, v := range headers {
 			if strings.EqualFold(k, "Host") {
 				req.Host = v

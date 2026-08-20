@@ -3,6 +3,7 @@ package httpclient
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -28,6 +29,29 @@ func TestRequestBytes_Success(t *testing.T) {
 	}
 	if string(body) != `{"status":"ok"}` {
 		t.Errorf("expected body '{\"status\":\"ok\"}', got %q", string(body))
+	}
+}
+
+func TestRequestBytes_NilBodySendsNoBody(t *testing.T) {
+	var receivedBody []byte
+	var receivedContentType string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		receivedContentType = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient()
+	_, err := client.RequestBytes(context.Background(), http.MethodGet, server.URL, nil, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(receivedBody) != 0 {
+		t.Errorf("expected empty request body for nil body, got %q", string(receivedBody))
+	}
+	if receivedContentType != "" {
+		t.Errorf("expected no Content-Type header for nil body, got %q", receivedContentType)
 	}
 }
 
