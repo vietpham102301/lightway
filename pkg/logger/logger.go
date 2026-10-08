@@ -93,6 +93,17 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Flush sends any buffered data to the client, so streaming handlers
+// (server-sent events, chunked progress) still work behind the middleware.
+func (r *statusRecorder) Flush() {
+	_ = http.NewResponseController(r.ResponseWriter).Flush()
+}
+
+// Unwrap returns the underlying ResponseWriter for http.NewResponseController.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 // HTTPMiddleware returns an HTTP middleware that logs each request with
 // method, path, status code, and duration.
 func HTTPMiddleware() func(http.Handler) http.Handler {

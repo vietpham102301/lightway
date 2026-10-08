@@ -9,6 +9,7 @@ import (
 
 	"github.com/vietpham102301/lightway/pkg/context"
 	aerror "github.com/vietpham102301/lightway/pkg/errors"
+	"github.com/vietpham102301/lightway/pkg/logger"
 )
 
 // ===========================================================================
@@ -431,5 +432,58 @@ func TestRouter_RoutesTracked(t *testing.T) {
 			t.Errorf("route[%d] expected %s %s, got %s %s",
 				i, e.Method, e.Path, (*r.routes)[i].Method, (*r.routes)[i].Path)
 		}
+	}
+}
+
+// ===========================================================================
+// Flush / Unwrap (streaming through the wrapper)
+// ===========================================================================
+
+func TestResponseWriter_Flush(t *testing.T) {
+	inner := httptest.NewRecorder()
+	rw := &responseWriter{ResponseWriter: inner}
+
+	var w http.ResponseWriter = rw
+	f, ok := w.(http.Flusher)
+	if !ok {
+		t.Fatal("expected responseWriter to implement http.Flusher")
+	}
+	f.Flush()
+
+	if !inner.Flushed {
+		t.Error("expected Flush to reach the underlying writer")
+	}
+	if !rw.HeaderWritten() || inner.Code != http.StatusOK {
+		t.Errorf("expected Flush to commit an implicit 200, got headerWritten=%v code=%d", rw.HeaderWritten(), inner.Code)
+	}
+}
+
+func TestResponseWriter_Unwrap(t *testing.T) {
+	inner := httptest.NewRecorder()
+	rw := &responseWriter{ResponseWriter: inner}
+
+	if rw.Unwrap() != inner {
+		t.Error("expected Unwrap to return the underlying writer")
+	}
+}
+
+func TestRouter_HandlerCanFlushThroughLoggingMiddleware(t *testing.T) {
+	r := NewRouter()
+	r.Use(logger.HTTPMiddleware())
+	var flushErr error
+	r.GET("/stream", func(c *context.Context) error {
+		c.W.Write([]byte("data: 1\n\n"))
+		flushErr = http.NewResponseController(c.W).Flush()
+		return nil
+	})
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/stream", nil))
+
+	if flushErr != nil {
+		t.Errorf("expected Flush through both wrappers to succeed, got %v", flushErr)
+	}
+	if !w.Flushed {
+		t.Error("expected Flush to reach the underlying writer")
 	}
 }
