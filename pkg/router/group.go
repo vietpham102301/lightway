@@ -61,6 +61,21 @@ func (rw *responseWriter) HeaderWritten() bool {
 	return rw.headerWritten
 }
 
+// Flush sends any buffered data to the client. Flushing commits the headers,
+// so an implicit 200 is recorded first, as Write does.
+func (rw *responseWriter) Flush() {
+	if !rw.headerWritten {
+		rw.WriteHeader(http.StatusOK)
+	}
+	_ = http.NewResponseController(rw.ResponseWriter).Flush()
+}
+
+// Unwrap returns the underlying ResponseWriter so http.NewResponseController
+// can reach optional interfaces (Hijacker, deadlines, ...) this wrapper lacks.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 type Router struct {
 	mux         *http.ServeMux
 	prefix      string

@@ -196,3 +196,24 @@ func TestHTTPMiddleware_DefaultStatusOK(t *testing.T) {
 		t.Errorf("expected default status 200, got %q", output)
 	}
 }
+
+func TestHTTPMiddleware_Flush(t *testing.T) {
+	var flushErr error
+	handler := HTTPMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := w.(http.Flusher); !ok {
+			t.Error("expected the middleware's writer to implement http.Flusher")
+		}
+		w.Write([]byte("data: 1\n\n"))
+		flushErr = http.NewResponseController(w).Flush()
+	}))
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("GET", "/stream", nil))
+
+	if flushErr != nil {
+		t.Errorf("expected Flush to succeed, got %v", flushErr)
+	}
+	if !w.Flushed {
+		t.Error("expected Flush to reach the underlying writer")
+	}
+}
